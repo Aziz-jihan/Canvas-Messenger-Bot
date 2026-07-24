@@ -11,25 +11,6 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '123456';
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
-// Standard Quick Replies Array
-const MENU_QUICK_REPLIES = [
-    {
-        content_type: "text",
-        title: "📢 Announcements",
-        payload: "GET_ANNOUNCEMENTS"
-    },
-    {
-        content_type: "text",
-        title: "📊 Grades",
-        payload: "GET_GRADES"
-    },
-    {
-        content_type: "text",
-        title: "📚 My Courses",
-        payload: "GET_COURSES"
-    }
-];
-
 // 1. GET /webhook — Verification
 app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -59,6 +40,7 @@ app.post('/webhook', async (req, res) => {
             const webhook_event = entry.messaging[0];
             const sender_psid = webhook_event.sender.id;
 
+            // Check if the user clicked a Quick Reply button OR typed a message
             if (webhook_event.message) {
                 // If user clicked a Quick Reply button
                 if (webhook_event.message.quick_reply) {
@@ -68,7 +50,8 @@ app.post('/webhook', async (req, res) => {
                 } 
                 // If user typed a text message
                 else if (webhook_event.message.text) {
-                    await sendQuickReplyMenu(sender_psid, "Welcome to Canvas LMS! What would you like to check?");
+                    // Send main menu with clickable buttons
+                    await sendQuickReplyMenu(sender_psid);
                 }
             }
         }
@@ -78,37 +61,53 @@ app.post('/webhook', async (req, res) => {
 });
 
 // Helper 1: Send Main Menu with Clickable Options
-async function sendQuickReplyMenu(senderPsid, textMessage) {
+async function sendQuickReplyMenu(senderPsid) {
     const requestBody = {
         recipient: { id: senderPsid },
         message: {
-            text: textMessage,
-            quick_replies: MENU_QUICK_REPLIES
+            text: "Welcome to Canvas LMS! What would you like to check?",
+            quick_replies: [
+                {
+                    content_type: "text",
+                    title: "📢 Announcements",
+                    payload: "GET_ANNOUNCEMENTS"
+                },
+                {
+                    content_type: "text",
+                    title: "📊 Grades",
+                    payload: "GET_GRADES"
+                },
+                {
+                    content_type: "text",
+                    title: "📚 My Courses",
+                    payload: "GET_COURSES"
+                }
+            ]
         }
     };
     await callSendAPI(requestBody);
 }
 
-// Helper 2: Handle button clicks AND re-attach the buttons so they never disappear!
+// Helper 2: Handle button clicks based on payload
 async function handleQuickReply(senderPsid, payload) {
     let responseText = "";
 
     switch (payload) {
         case "GET_ANNOUNCEMENTS":
-            responseText = "📢 Canvas Announcements:\n\n• Exam 1 results posted\n• Homework 2 due this Friday";
+            responseText = "📢 Here are your latest Canvas Announcements:";
             break;
         case "GET_GRADES":
-            responseText = "📊 Canvas Grades Summary:\n\n• Web Development: 95%\n• Database Systems: 88%";
+            responseText = "📊 Canvas Grades Summary:\n\n";
             break;
         case "GET_COURSES":
-            responseText = "📚 Enrolled Courses:\n\n1. CS101: Intro to Web Development\n2. CS202: Database Architecture";
+            responseText = "📚 Enrolled Courses:\n\n";
             break;
         default:
             responseText = "I didn't understand that option.";
     }
 
-    // Send the response AND re-attach the quick reply buttons so they remain visible!
-    await sendQuickReplyMenu(senderPsid, responseText);
+    // Send answer back
+    await callSendAPI({ recipient: { id: senderPsid }, message: { text: responseText } });
 }
 
 // Low-level helper to send request to Facebook Graph API
