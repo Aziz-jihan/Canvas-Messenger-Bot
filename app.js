@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -8,6 +9,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '123456';
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
 // 1. GET /webhook — Verification endpoint required by Facebook
 app.get('/webhook', (req, res) => {
@@ -29,7 +31,7 @@ app.get('/webhook', (req, res) => {
 });
 
 // 2. POST /webhook — Receives incoming chat messages from Facebook
-app.post('/webhook', (req, res) => {
+app.post('/webhook', async (req, res) => {
     console.log('Received webhook event:', JSON.stringify(req.body, null, 2));
 
     const body = req.body;
