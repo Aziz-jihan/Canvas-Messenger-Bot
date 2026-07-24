@@ -31,8 +31,43 @@ app.get('/webhook', (req, res) => {
 // 2. POST /webhook — Receives incoming chat messages from Facebook
 app.post('/webhook', (req, res) => {
     console.log('Received webhook event:', JSON.stringify(req.body, null, 2));
-    res.status(200).send('EVENT_RECEIVED');
+
+    const body = req.body;
+
+    if (body.object === 'page') {
+        res.status(200).send('EVENT_RECEIVED');
+
+         for (const entry of body.entry) {
+            const webhook_event = entry.messaging[0];
+            const sender_psid = webhook_event.sender.id; // User's unique ID
+            if (webhook_event.message && webhook_event.message.text) {
+                const text = webhook_event.message.text.toLowerCase();
+                console.log(`Received message: "${text}" from ${sender_psid}`);
+                // Reply to user
+                await sendTextMessage(sender_psid, `wassup!!! I am your Canvas LMS Assistant. You said: "${webhook_event.message.text}"`);
+            }
+        }
+    }else {
+        res.sendStatus(404);
+    }
 });
+
+
+async function sendTextMessage(senderPsid, responseText) {
+    const requestBody = {
+        recipient: { id: senderPsid },
+        message: { text: responseText }
+    };
+    try {
+        await axios.post(
+            `https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+            requestBody
+        );
+        console.log('Successfully sent message back to user!');
+    } catch (error) {
+        console.error('Error sending message:', error.response ? error.response.data : error.message);
+    }
+}
 
 // Root route for sanity check
 app.get('/', (req, res) => {
