@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import { Courses, Announcements, Grades } from './messageFormatter.js';
 
 dotenv.config();
 
@@ -143,22 +144,30 @@ async function sendQuickReplyMenu(senderPsid, textMessage) {
     await callSendAPI(requestBody);
 }
 
-// Handle option selection (works for both Quick Replies and Persistent Menu)
+// Handle option selection by fetching REAL Canvas data from canvasService.js!
 async function handleOptionSelected(senderPsid, payload) {
     let responseText = "";
 
-    switch (payload) {
-        case "GET_ANNOUNCEMENTS":
-            responseText = "📢 Canvas Announcements:\n\n• Exam 1 results posted\n• Homework 2 due this Friday";
-            break;
-        case "GET_GRADES":
-            responseText = "📊 Canvas Grades Summary:\n\n• Web Development: 95%\n• Database Systems: 88%";
-            break;
-        case "GET_COURSES":
-            responseText = "📚 Enrolled Courses:\n\n1. CS101: Intro to Web Development\n2. CS202: Database Architecture";
-            break;
-        default:
-            responseText = "I didn't understand that option.";
+    try {
+        switch (payload) {
+            case "GET_ANNOUNCEMENTS": {
+                responseText = await Announcements();
+                break;
+            }
+            case "GET_GRADES": {
+                responseText = await Grades();
+                break;
+            }
+            case "GET_COURSES": {
+                responseText = await Courses();
+                break;
+            }
+            default:
+                responseText = "I didn't understand that option.";
+        }
+    } catch (err) {
+        console.error("Canvas Service Error:", err.message);
+        responseText = "⚠️ Unable to fetch data from Canvas right now. Please verify CANVAS_BASE_URL and CANVAS_API_TOKEN in your .env / Render environment variables.";
     }
 
     await sendQuickReplyMenu(senderPsid, responseText);
@@ -183,7 +192,6 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
-    // Auto configure persistent menu on startup if PAGE_ACCESS_TOKEN exists
     if (PAGE_ACCESS_TOKEN) {
         setupPersistentMenu();
     }
