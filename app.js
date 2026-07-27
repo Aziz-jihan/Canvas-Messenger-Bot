@@ -1,7 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import { Courses, Announcements, Grades } from './messageFormatter.js';
+import { Courses, Announcements, Grades, Assignments } from './messageFormatter.js';
 
 dotenv.config();
 
@@ -28,6 +28,11 @@ const MENU_QUICK_REPLIES = [
         content_type: "text",
         title: "📚 My Courses",
         payload: "GET_COURSES"
+    },
+    {
+        content_type: "text",
+        title: "📝 Assignments",
+        payload: "GET_ASSIGNMENT"
     }
 ];
 
@@ -115,6 +120,11 @@ async function setupPersistentMenu() {
                         type: "postback",
                         title: "📚 My Courses",
                         payload: "GET_COURSES"
+                    },
+                    {
+                        type: "postback",
+                        title: "📝 Assignments",
+                        payload: "GET_ASSIGNMENT"
                     }
                 ]
             }
@@ -160,6 +170,10 @@ async function handleOptionSelected(senderPsid, payload) {
             }
             case "GET_COURSES": {
                 responseText = await Courses();
+                break;
+            }
+            case "GET_ASSIGNMENT": {
+                responseText = await Assignments();
                 break;
             }
             default:

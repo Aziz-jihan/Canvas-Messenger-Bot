@@ -78,3 +78,19 @@ export async function getGrades() {
         throw error;
     }
 }
+
+export async function getAssignments(courseId) {
+    try {
+        const response = await canvasClient.get(`/courses/${courseId}/assignments`,{
+            params: {
+                bucket: 'upcoming',
+            }
+        });
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching assignments for course ${courseId}:`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
+
