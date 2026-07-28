@@ -37,16 +37,22 @@ export async function Announcements() {
 export async function Grades() {
     let output = "📊 Canvas Grades Summary:\n\n";
     try {
-        const grades = await getGrades();  
+        const courses = await getCourses();
+        const gradePromises = [];
 
-        grades.forEach(g => {
-        if(g.enrollments[0].computed_current_score !== null){
-        output += `• ${g.name.split(" ")[0]}\n ${g.enrollments[0].computed_current_score}\n`;
-        }
-    });
-    return output;
+        courses.forEach(course => {
+            gradePromises.push(
+                getGrades(course.id).then(gradeMessage => {
+                    output += `• ${course.name}\n`;
+                    output += gradeMessage ? `${gradeMessage}\n\n` : 'No grades available\n\n';
+                })
+            );
+        });
 
-    }catch (error) {
+        await Promise.all(gradePromises);
+        return output;
+
+    } catch (error) {
         console.error('Error fetching Canvas grades:', error.response?.data || error.message);
         throw error;
     }

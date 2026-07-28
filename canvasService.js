@@ -60,24 +60,6 @@ export async function getAnnouncements() {
     }
 }
 
-/**
- * 3. Fetch grades & total scores for enrolled courses
- * Canvas Endpoint: GET /api/v1/courses?include[]=total_scores
- */
-export async function getGrades() {
-    try {
-        const response = await canvasClient.get('/courses', {
-            params: {
-                enrollment_state: 'active',
-                'include[]': ['total_scores']
-            }
-        });
-        return response.data;
-    } catch (error) {
-        console.error('Error fetching Canvas grades:', error.response?.data || error.message);
-        throw error;
-    }
-}
 
 export async function getAssignments(courseId) {
     try {
@@ -91,6 +73,40 @@ export async function getAssignments(courseId) {
         console.error(`Error fetching assignments for course ${courseId}:`, error.response?.data || error.message);
         throw error;
     }
+}
+
+
+export async function getGrades(courseId) {
+    try {
+        const response = await canvasClient.get(`/courses/${courseId}/students/submissions`, {
+            params: {
+                student_ids: ['self'],
+                include: ['assignment']
+            }
+        });
+        const submissions =  response.data;
+        const published = getPublishedGrades(submissions);
+        return formatGrades(published);
+    } catch (error) {
+        console.error(`Error fetching grade details for course ${courseId}:`, error.response?.data || error.message);
+        throw error;
+    }
+}
+
+function getPublishedGrades(submissions) {
+  return submissions
+    .filter(sub => sub.workflow_state === 'graded' && sub.score !== null)
+    .map(sub => ({
+      name: sub.assignment.name.trim(),      // trim() because "Quiz 01 " has a trailing space in the raw data
+      score: sub.score,
+      pointsPossible: sub.assignment.points_possible
+    }));
+}
+
+function formatGrades(publishedGrades) {
+  return publishedGrades
+    .map(g => `${g.name} : ${g.score}/${g.pointsPossible}`)
+    .join('\n');
 }
 
 
