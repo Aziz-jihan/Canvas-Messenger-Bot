@@ -14,6 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '123456';
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // Standard Quick Replies Array
 const MENU_QUICK_REPLIES = [
@@ -28,7 +29,7 @@ const MENU_QUICK_REPLIES = [
         payload: "GET_GRADES"
     },
     {
-        content_type: "text",
+        content_type: "text", 
         title: "📚 My Courses",
         payload: "GET_COURSES"
     },
@@ -114,23 +115,15 @@ app.post('/webhook', async (req, res) => {
         res.status(200).send('EVENT_RECEIVED');
 
         for (const entry of body.entry) {
-            const webhook_event = entry.messaging ? entry.messaging[0] : null;
-            if (!webhook_event) continue;
-
-            // CRITICAL FIX: Ignore delivery receipts, read receipts, and bot message echoes!
-            if (webhook_event.delivery || webhook_event.read || webhook_event.message?.is_echo) {
-                continue;
-            }
-
-            const sender_psid = webhook_event.sender?.id;
-            if (!sender_psid) continue;
+            const webhook_event = entry.messaging[0];
+            const sender_psid = webhook_event.sender.id;
 
             // Check if user is registered and has a valid (< 30 days) token
             const user = await getUser(sender_psid);
             const valid = isTokenValid(user);
 
             if (!valid) {
-                await sendRegistrationLink(req, sender_psid, user ? 'expired' : 'new');
+                await sendRegistrationLink(sender_psid, user ? 'expired' : 'new');
                 continue;
             }
 
@@ -157,15 +150,19 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Send Registration Link to unregistered or expired users with DYNAMIC Host domain
-async function sendRegistrationLink(req, senderPsid, status) {
-    // Dynamically get public domain (Render / Ngrok / Local) from request headers
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-    const host = req.headers.host;
-    const baseUrl = process.env.APP_URL || `${protocol}://${host}`;
+// to get verified privacy policy page for Facebook Messenger
+app.get('/privacy', (req, res) => {
+    res.send(`
+        <h1>Privacy Policy</h1>
+        <p>This bot collects only your Canvas API Access Token to retrieve your personal academic data from Canvas LMS. 
+        Your token is stored securely and is never shared with third parties. 
+        Tokens automatically expire after 30 days.</p>
+    `);
+});
 
-    const registerUrl = `${baseUrl}/register?psid=${senderPsid}`;
-    
+// Send Registration Link to unregistered or expired users
+async function sendRegistrationLink(senderPsid, status) {
+    const registerUrl = `${APP_URL}/register?psid=${senderPsid}`;
     let intro = "👋 Welcome to Canvas LMS Bot!";
     if (status === 'expired') {
         intro = "⚠️ Your Canvas token has expired (tokens are valid for 30 days).";

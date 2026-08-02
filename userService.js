@@ -8,7 +8,7 @@ export async function getUser(psid) {
         const result = await pool.query('SELECT * FROM users WHERE psid = $1', [psid]);
         return result.rows[0] || null;
     } catch (error) {
-        console.error(`Error fetching user ${psid}:`, error.message);
+        console.error(`DB ERROR in getUser for PSID ${psid}:`, error.message);
         return null;
     }
 }
@@ -28,7 +28,7 @@ export async function saveUser(psid, canvasToken) {
         console.log(`User ${psid} token successfully saved/updated in Neon DB.`);
         return true;
     } catch (error) {
-        console.error(`Error saving user ${psid}:`, error.message);
+        console.error(`DB ERROR in saveUser for PSID ${psid}:`, error.message);
         throw error;
     }
 }
@@ -41,7 +41,16 @@ export function isTokenValid(user) {
         return false;
     }
 
-    const updatedAt = new Date(user.updated_at || user.created_at).getTime();
+    const dateVal = user.updated_at || user.created_at;
+    if (!dateVal) {
+        return true;
+    }
+
+    const updatedAt = new Date(dateVal).getTime();
+    if (isNaN(updatedAt)) {
+        return true;
+    }
+
     const now = Date.now();
     const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
 
