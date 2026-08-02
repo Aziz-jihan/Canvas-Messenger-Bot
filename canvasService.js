@@ -3,26 +3,40 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Base Canvas API domain and token stored safely in .env
-const CANVAS_BASE_URL = 'https://northsouth.instructure.com/api/v1';
-const CANVAS_API_TOKEN = process.env.CANVAS_API_TOKEN;
-
-// Create a pre-configured Axios instance for Canvas API calls
-// The 'Authorization: Bearer <TOKEN>' header is automatically attached to every request!
-const canvasClient = axios.create({
-    baseURL: CANVAS_BASE_URL,
-    headers: {
-        'Authorization': `Bearer ${CANVAS_API_TOKEN}`
-    }
-});
+const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL || 'https://northsouth.instructure.com/api/v1';
 
 /**
- * 1. Fetch active courses for the student
- * Canvas Endpoint: GET /api/v1/courses
+ * Creates a scoped Axios client for a specific user's Canvas token
  */
-export async function getCourses() {
+function createCanvasClient(canvasToken) {
+    return axios.create({
+        baseURL: CANVAS_BASE_URL,
+        headers: {
+            'Authorization': `Bearer ${canvasToken}`
+        }
+    });
+}
+
+/**
+ * Test/Validate a user's Canvas token by attempting to fetch self profile/courses
+ */
+export async function validateToken(canvasToken) {
     try {
-        const response = await canvasClient.get('/courses', {
+        const client = createCanvasClient(canvasToken);
+        const response = await client.get('/users/self');
+        return { valid: true, user: response.data };
+    } catch (error) {
+        return { valid: false, error: error.response?.data?.message || 'Invalid Canvas Token' };
+    }
+}
+
+/**
+ * 1. Fetch active courses for a user
+ */
+export async function getCourses(canvasToken) {
+    try {
+        const client = createCanvasClient(canvasToken);
+        const response = await client.get('/courses', {
             params: {
                 enrollment_state: 'active'
             }
@@ -35,20 +49,19 @@ export async function getCourses() {
 }
 
 /**
- * 2. Fetch recent announcements across all enrolled courses
- * Canvas Endpoint: GET /api/v1/announcements
+ * 2. Fetch recent announcements for a user
  */
-export async function getAnnouncements() {
+export async function getAnnouncements(canvasToken) {
     try {
-        // First get active courses to construct context codes (e.g. course_12345)
-        const courses = await getCourses();
+        const courses = await getCourses(canvasToken);
         if (!courses || courses.length === 0) {
             return [];
         }
 
         const contextCodes = courses.map(course => `course_${course.id}`);
+        const client = createCanvasClient(canvasToken);
 
-        const response = await canvasClient.get('/announcements', {
+        const response = await client.get('/announcements', {
             params: {
                 'context_codes[]': contextCodes
             }
@@ -60,12 +73,15 @@ export async function getAnnouncements() {
     }
 }
 
-
-export async function getAssignments(courseId) {
+/**
+ * 3. Fetch upcoming assignments for a specific course
+ */
+export async function getAssignments(canvasToken, courseId) {
     try {
-        const response = await canvasClient.get(`/courses/${courseId}/assignments`,{
+        const client = createCanvasClient(canvasToken);
+        const response = await client.get(`/courses/${courseId}/assignments`, {
             params: {
-                bucket: 'upcoming',
+                bucket: 'upcoming'
             }
         });
         return response.data;
@@ -75,16 +91,19 @@ export async function getAssignments(courseId) {
     }
 }
 
-
-export async function getGrades(courseId) {
+/**
+ * 4. Fetch grade submissions for a specific course
+ */
+export async function getGrades(canvasToken, courseId) {
     try {
-        const response = await canvasClient.get(`/courses/${courseId}/students/submissions`, {
+        const client = createCanvasClient(canvasToken);
+        const response = await client.get(`/courses/${courseId}/students/submissions`, {
             params: {
                 student_ids: ['self'],
                 include: ['assignment']
             }
         });
-        const submissions =  response.data;
+        const submissions = response.data;
         const published = getPublishedGrades(submissions);
         return formatGrades(published);
     } catch (error) {
@@ -94,19 +113,20 @@ export async function getGrades(courseId) {
 }
 
 function getPublishedGrades(submissions) {
-  return submissions
-    .filter(sub => sub.workflow_state === 'graded' && sub.score !== null)
-    .map(sub => ({
-      name: sub.assignment.name.trim(),      // trim() because "Quiz 01 " has a trailing space in the raw data
-      score: sub.score,
-      pointsPossible: sub.assignment.points_possible
-    }));
+    return submissions
+        .filter(sub => sub.workflow_state === 'graded' && sub.score !== null)
+        .map(sub => ({
+            name: sub.assignment ? sub.assignment.name.trim() : 'Assignment',
+            score: sub.score,
+            pointsPossible: sub.assignment ? sub.assignment.points_possible : 100
+        }));
 }
 
 function formatGrades(publishedGrades) {
-  return publishedGrades
-    .map(g => `${g.name} : ${g.score}/${g.pointsPossible}`)
-    .join('\n');
+    if (!publishedGrades || publishedGrades.length === 0) {
+        return "No graded submissions yet.";
+    }
+    return publishedGrades
+        .map(g => `• ${g.name} : ${g.score}/${g.pointsPossible}`)
+        .join('\n');
 }
-
-

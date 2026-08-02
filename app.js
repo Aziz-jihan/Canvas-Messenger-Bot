@@ -2,15 +2,19 @@ import express from 'express';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import { Courses, Announcements, Grades, Assignments } from './messageFormatter.js';
+import { validateToken } from './canvasService.js';
+import { getUser, saveUser, isTokenValid } from './userService.js';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '123456';
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // Standard Quick Replies Array
 const MENU_QUICK_REPLIES = [
@@ -54,6 +58,45 @@ app.get('/webhook', (req, res) => {
     }
 });
 
+// 2. GET /register — Serves the Registration Form
+app.get('/register', (req, res) => {
+    const psid = req.query.psid || '';
+    res.send(getRegistrationHTML(psid));
+});
+
+// 3. POST /api/register — Validates Canvas Token & Saves to Neon DB
+app.post('/api/register', async (req, res) => {
+    const { psid, canvas_token } = req.body;
+
+    if (!psid || !canvas_token) {
+        return res.status(400).json({ success: false, message: 'Missing PSID or Canvas Token' });
+    }
+
+    console.log(`Validating Canvas Token for PSID: ${psid}...`);
+    const validation = await validateToken(canvas_token.trim());
+
+    if (!validation.valid) {
+        return res.json({ success: false, message: validation.error || 'Invalid Canvas Access Token' });
+    }
+
+    try {
+        // Save token to Neon DB
+        await saveUser(psid, canvas_token.trim());
+
+        // Send a welcome message directly in Messenger!
+        const studentName = validation.user?.name ? `, ${validation.user.name}` : '';
+        await sendQuickReplyMenu(
+            psid,
+            `🎉 Welcome to Canvas LMS Bot${studentName}!\n\nYour account has been connected successfully. Your token is valid for 30 days. Use the menu below to explore your Canvas data:`
+        );
+
+        return res.json({ success: true, name: validation.user?.name || 'Student' });
+    } catch (err) {
+        console.error('Failed to register user:', err.message);
+        return res.status(500).json({ success: false, message: 'Database error saving token' });
+    }
+});
+
 // Route to manually trigger/update Persistent Menu setup
 app.get('/setup-menu', async (req, res) => {
     try {
@@ -64,7 +107,7 @@ app.get('/setup-menu', async (req, res) => {
     }
 });
 
-// 2. POST /webhook — Receives incoming chat, button clicks & postbacks
+// 4. POST /webhook — Receives incoming chat, button clicks & postbacks
 app.post('/webhook', async (req, res) => {
     const body = req.body;
 
@@ -75,21 +118,30 @@ app.post('/webhook', async (req, res) => {
             const webhook_event = entry.messaging[0];
             const sender_psid = webhook_event.sender.id;
 
+            // Check if user is registered and has a valid (< 30 days) token
+            const user = await getUser(sender_psid);
+            const valid = isTokenValid(user);
+
+            if (!valid) {
+                await sendRegistrationLink(sender_psid, user ? 'expired' : 'new');
+                continue;
+            }
+
             // Handle Persistent Menu clicks (Postbacks)
             if (webhook_event.postback) {
                 const payload = webhook_event.postback.payload;
                 console.log(`Persistent Menu clicked payload: ${payload}`);
-                await handleOptionSelected(sender_psid, payload);
+                await handleOptionSelected(sender_psid, payload, user.canvas_token);
             }
             // Handle Quick Replies or typed messages
             else if (webhook_event.message) {
                 if (webhook_event.message.quick_reply) {
                     const payload = webhook_event.message.quick_reply.payload;
                     console.log(`Quick Reply clicked payload: ${payload}`);
-                    await handleOptionSelected(sender_psid, payload);
+                    await handleOptionSelected(sender_psid, payload, user.canvas_token);
                 } 
                 else if (webhook_event.message.text) {
-                    await sendQuickReplyMenu(sender_psid, "Welcome to Canvas LMS! Select an option below or use the chat menu:");
+                    await sendQuickReplyMenu(sender_psid, "Select an option below or use the chat menu:");
                 }
             }
         }
@@ -97,6 +149,22 @@ app.post('/webhook', async (req, res) => {
         res.sendStatus(404);
     }
 });
+
+// Send Registration Link to unregistered or expired users
+async function sendRegistrationLink(senderPsid, status) {
+    const registerUrl = `${APP_URL}/register?psid=${senderPsid}`;
+    let intro = "👋 Welcome to Canvas LMS Bot!";
+    if (status === 'expired') {
+        intro = "⚠️ Your Canvas token has expired (tokens are valid for 30 days).";
+    }
+
+    const messageText = `${intro}\n\nPlease click the link below to connect your Canvas account:\n\n${registerUrl}`;
+    
+    await callSendAPI({
+        recipient: { id: senderPsid },
+        message: { text: messageText }
+    });
+}
 
 // Setup Facebook Messenger Persistent Menu (Pinned 24/7 in chat bar)
 async function setupPersistentMenu() {
@@ -154,26 +222,26 @@ async function sendQuickReplyMenu(senderPsid, textMessage) {
     await callSendAPI(requestBody);
 }
 
-// Handle option selection by fetching REAL Canvas data from canvasService.js!
-async function handleOptionSelected(senderPsid, payload) {
+// Handle option selection by fetching REAL Canvas data for specific user token
+async function handleOptionSelected(senderPsid, payload, canvasToken) {
     let responseText = "";
 
     try {
         switch (payload) {
             case "GET_ANNOUNCEMENTS": {
-                responseText = await Announcements();
+                responseText = await Announcements(canvasToken);
                 break;
             }
             case "GET_GRADES": {
-                responseText = await Grades();
+                responseText = await Grades(canvasToken);
                 break;
             }
             case "GET_COURSES": {
-                responseText = await Courses();
+                responseText = await Courses(canvasToken);
                 break;
             }
             case "GET_ASSIGNMENT": {
-                responseText = await Assignments();
+                responseText = await Assignments(canvasToken);
                 break;
             }
             default:
@@ -181,7 +249,7 @@ async function handleOptionSelected(senderPsid, payload) {
         }
     } catch (err) {
         console.error("Canvas Service Error:", err.message);
-        responseText = "⚠️ Unable to fetch data from Canvas right now. Please verify CANVAS_BASE_URL and CANVAS_API_TOKEN in your .env / Render environment variables.";
+        responseText = "⚠️ Unable to fetch data from Canvas right now. Please make sure your token is valid.";
     }
 
     await sendQuickReplyMenu(senderPsid, responseText);
@@ -198,6 +266,103 @@ async function callSendAPI(requestBody) {
     } catch (error) {
         console.error('Error sending message:', error.response ? error.response.data : error.message);
     }
+}
+
+// HTML Registration Page Template
+function getRegistrationHTML(psid) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Canvas LMS</title>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: #f0f2f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 30px; width: 100%; max-width: 420px; }
+        h2 { margin-top: 0; color: #1c1e21; text-align: center; }
+        p { color: #606770; font-size: 14px; line-height: 1.5; text-align: center; }
+        .form-group { margin-top: 20px; }
+        label { display: block; font-weight: 600; font-size: 13px; color: #4b4f56; margin-bottom: 8px; }
+        input { width: 100%; padding: 12px; border: 2px solid #ccc; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+        input.green { border-color: #2e7d32 !important; background-color: #e8f5e9; }
+        input.red { border-color: #d32f2f !important; background-color: #ffebee; }
+        .btn { width: 100%; background: #0084ff; color: white; border: none; padding: 12px; font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer; margin-top: 20px; transition: background 0.2s; }
+        .btn:disabled { background: #bcc0c4; cursor: not-allowed; }
+        .status-msg { margin-top: 15px; font-size: 13px; text-align: center; font-weight: 600; }
+        .status-msg.success { color: #2e7d32; }
+        .status-msg.error { color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🎓 Connect Canvas LMS</h2>
+        <p>Enter your Canvas Access Token below to connect your Canvas account with Messenger. Tokens expire after 30 days.</p>
+        <form id="regForm">
+            <input type="hidden" id="psid" value="${psid}">
+            <div class="form-group">
+                <label for="token">Canvas API Access Token</label>
+                <input type="password" id="token" placeholder="Paste your Canvas token here..." required>
+            </div>
+            <button type="submit" id="submitBtn" class="btn">Connect Canvas</button>
+        </form>
+        <div id="statusMsg" class="status-msg"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('regForm');
+        const tokenInput = document.getElementById('token');
+        const submitBtn = document.getElementById('submitBtn');
+        const statusMsg = document.getElementById('statusMsg');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const psid = document.getElementById('psid').value;
+            const canvas_token = tokenInput.value.trim();
+
+            if (!psid) {
+                statusMsg.className = 'status-msg error';
+                statusMsg.textContent = 'Invalid link. Please open this link directly from Messenger.';
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Validating Token...';
+            tokenInput.className = '';
+            statusMsg.textContent = '';
+
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ psid, canvas_token })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    tokenInput.className = 'green';
+                    statusMsg.className = 'status-msg success';
+                    statusMsg.textContent = '🎉 Connected successfully as ' + data.name + '! You can now close this tab and return to Messenger.';
+                    submitBtn.textContent = 'Connected!';
+                } else {
+                    tokenInput.className = 'red';
+                    statusMsg.className = 'status-msg error';
+                    statusMsg.textContent = '❌ ' + (data.message || 'Invalid Token');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Try Again';
+                }
+            } catch (err) {
+                tokenInput.className = 'red';
+                statusMsg.className = 'status-msg error';
+                statusMsg.textContent = 'Network error. Please try again.';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Try Again';
+            }
+        });
+    </script>
+</body>
+</html>`;
 }
 
 app.get('/', (req, res) => {

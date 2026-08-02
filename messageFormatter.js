@@ -1,11 +1,9 @@
 import { getCourses, getAnnouncements, getGrades, getAssignments } from './canvasService.js';
-import { fileURLToPath } from 'url';
 
-
-export async function Announcements() {
+export async function Announcements(canvasToken) {
     let output = "📢 Recent Canvas Announcements:\n\n";
     try {
-        const announcements = await getAnnouncements(); 
+        const announcements = await getAnnouncements(canvasToken); 
         output += `${announcements.length} recent announcement(s):\n\n`;
         announcements.slice(0, 5).forEach(a => {
             const cleanMessage = a.message ? a.message.replace(/<[^>]*>?/gm, '').substring(0, 80) + '...' : '';
@@ -27,22 +25,21 @@ export async function Announcements() {
         });
         return output;
 
-    }catch (error) {
+    } catch (error) {
         console.error('Error fetching Canvas announcements:', error.response?.data || error.message);
         throw error;
     }
 }
 
-
-export async function Grades() {
+export async function Grades(canvasToken) {
     let output = "📊 Canvas Grades Summary:\n\n";
     try {
-        const courses = await getCourses();
+        const courses = await getCourses(canvasToken);
         const gradePromises = [];
 
         courses.forEach(course => {
             gradePromises.push(
-                getGrades(course.id).then(gradeMessage => {
+                getGrades(canvasToken, course.id).then(gradeMessage => {
                     output += `• ${course.name}\n`;
                     output += gradeMessage ? `${gradeMessage}\n\n` : 'No grades available\n\n';
                 })
@@ -58,12 +55,12 @@ export async function Grades() {
     }
 }
 
-export async function Courses() {
+export async function Courses(canvasToken) {
     let output = "📚 Enrolled Canvas Courses:\n\n";
     try {
-        const courses = await getCourses();
+        const courses = await getCourses(canvasToken);
         courses.forEach(c => {
-            output += `•${c.name}\n`;
+            output += `• ${c.name}\n`;
         });
         return output;
 
@@ -73,39 +70,46 @@ export async function Courses() {
     }
 }
 
-
-export async function Assignments() {
+export async function Assignments(canvasToken) {
     let output = "📝 Upcoming Canvas Assignments:\n\n";
     try {
-        const courses = await getCourses();
+        const courses = await getCourses(canvasToken);
         for (const course of courses) {
-            const assignment = await getAssignments(course.id);
-            if (assignment.length > 0) {
-                output += `📘 ${course.name.split(" ")[0]}:\n${assignment.name}\n`;
-               
-                const dueDate = new Date(assignment.due_at);
-                const day = String(dueDate.getDate()).padStart(2, '0');
-                const month = String(dueDate.getMonth() + 1).padStart(2, '0');
-                const year = String(dueDate.getFullYear()).slice(-2);
+            const assignmentsList = await getAssignments(canvasToken, course.id);
+            if (assignmentsList && assignmentsList.length > 0) {
+                for (const assignment of assignmentsList) {
+                    output += `📘 ${course.name.split(" ")[0]}:\n${assignment.name}\n`;
+                   
+                    if (assignment.due_at) {
+                        const dueDate = new Date(assignment.due_at);
+                        const day = String(dueDate.getDate()).padStart(2, '0');
+                        const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+                        const year = String(dueDate.getFullYear()).slice(-2);
 
-                let hours = dueDate.getHours();
-                const minutes = String(postedAt.getMinutes()).padStart(2, '0');
-                const ampm = hours >= 12 ? 'PM' : 'AM';
-                hours = hours % 12 || 12; // convert 0 → 12 for 12-hour clock
-                const formattedTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+                        let hours = dueDate.getHours();
+                        const minutes = String(dueDate.getMinutes()).padStart(2, '0');
+                        const ampm = hours >= 12 ? 'PM' : 'AM';
+                        hours = hours % 12 || 12;
+                        const formattedTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
 
-                output += `Deadline: ${day}-${month}-${year} ${formattedTime}\n`;
-                const cleanDescription = assignment.description ? assignment.description.replace(/<[^>]*>?/gm, '').substring(0, 80) + '...' : '';
-                output += `Description: ${cleanDescription}\n\n`;
-                output += assignment.points_possible ? `Points Possible: ${assignment.points_possible}\n\n` : '';
-                output += "\n\n";
+                        output += `Deadline: ${day}-${month}-${year} ${formattedTime}\n`;
+                    }
+                    
+                    const cleanDescription = assignment.description ? assignment.description.replace(/<[^>]*>?/gm, '').substring(0, 80) + '...' : '';
+                    if (cleanDescription) {
+                        output += `Description: ${cleanDescription}\n`;
+                    }
+                    if (assignment.points_possible) {
+                        output += `Points Possible: ${assignment.points_possible}\n`;
+                    }
+                    output += "\n";
+                }
             }
         }
         return output;
 
-    }catch (error) {
+    } catch (error) {
         console.error('Error fetching Canvas assignments:', error.response?.data || error.message);
         throw error;
     }
 }
-
