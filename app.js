@@ -14,7 +14,10 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || '123456';
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
-const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+const APP_URL = process.env.APP_URL;
+if (!APP_URL) {
+    console.error('FATAL: APP_URL environment variable is not set! Registration links will not work.');
+}
 
 // Standard Quick Replies Array
 const MENU_QUICK_REPLIES = [
@@ -115,8 +118,17 @@ app.post('/webhook', async (req, res) => {
         res.status(200).send('EVENT_RECEIVED');
 
         for (const entry of body.entry) {
-            const webhook_event = entry.messaging[0];
-            const sender_psid = webhook_event.sender.id;
+            const webhook_event = entry.messaging ? entry.messaging[0] : null;
+            if (!webhook_event) continue;
+
+            // CRITICAL: Ignore delivery receipts, read receipts, and bot's own message echoes
+            // Without this, every message the bot sends triggers another webhook event = infinite loop!
+            if (webhook_event.delivery || webhook_event.read || webhook_event.message?.is_echo) {
+                continue;
+            }
+
+            const sender_psid = webhook_event.sender?.id;
+            if (!sender_psid) continue;
 
             // Check if user is registered and has a valid (< 30 days) token
             const user = await getUser(sender_psid);
@@ -162,6 +174,10 @@ app.get('/privacy', (req, res) => {
 
 // Send Registration Link to unregistered or expired users
 async function sendRegistrationLink(senderPsid, status) {
+    if (!APP_URL) {
+        console.error('Cannot send registration link: APP_URL environment variable is not set on Render.');
+        return;
+    }
     const registerUrl = `${APP_URL}/register?psid=${senderPsid}`;
     let intro = "👋 Welcome to Canvas LMS Bot!";
     if (status === 'expired') {
