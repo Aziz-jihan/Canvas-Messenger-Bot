@@ -3,26 +3,45 @@ import { getCourses, getAnnouncements, getGrades, getAssignments } from './canva
 export async function Announcements(canvasToken) {
     let output = "📢 Recent Canvas Announcements:\n\n";
     try {
-        const announcements = await getAnnouncements(canvasToken); 
+        const courses = await getCourses(canvasToken);
+        const announcements = await getAnnouncements(canvasToken);
         output += `${announcements.length} recent announcement(s):\n\n`;
-        announcements.slice(0, 5).forEach(a => {
-            const cleanMessage = a.message ? a.message.replace(/<[^>]*>?/gm, '').substring(0, 80) + '...' : '';
-
-            // Date formatting
-            const postedAt = new Date(a.posted_at);
-            const day = String(postedAt.getDate()).padStart(2, '0');
-            const month = String(postedAt.getMonth() + 1).padStart(2, '0');
-            const year = String(postedAt.getFullYear()).slice(-2);
-            const formattedDate = `${day}-${month}-${year}`;
-
-            let hours = postedAt.getHours();
-            const minutes = String(postedAt.getMinutes()).padStart(2, '0');
-            const ampm = hours >= 12 ? 'PM' : 'AM';
-            hours = hours % 12 || 12; // convert 0 → 12 for 12-hour clock
-            const formattedTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
-
-            output += `• ${a.title}\n${formattedDate} at ${formattedTime}\n${cleanMessage}\n\n`;
+        const courseMap = {};
+        courses.forEach(course => {
+            courseMap[`course_${course.id}`] = course.name;
         });
+
+        announcements.forEach(announcement => {
+            const courseName = courseMap[announcement.context_code] || 'Unknown Course';
+            const title = (announcement.title || '').trim();
+            const message = announcement.message
+                ? announcement.message.replace(/<[^>]*>?/gm, '').substring(0, 500) + '...'
+                : '';
+            const postedAt = announcement.posted_at;
+            const author = announcement.author?.display_name || 'Unknown';
+            const attachments = (announcement.attachments || []).map(a => ({
+                name: a.display_name,
+                url: a.url
+            }));
+
+            output += `Course: ${courseName}\n`;
+            output += `📢 ${title}\n`;
+            output += `Posted by: ${author}\n`;
+            output += `Date: ${new Date(postedAt).toLocaleDateString()}\n\n`;
+            output += `${message}\n`;
+
+            if (attachments.length > 0) {
+                output += `\n📎 Attachments:\n`;
+                attachments.forEach(a => {
+                output += `- ${a.name}: ${a.url}\n`;
+                });
+            }
+
+            output += '\n\n';
+
+        })                
+
+
         return output;
 
     } catch (error) {
@@ -113,3 +132,6 @@ export async function Assignments(canvasToken) {
         throw error;
     }
 }
+
+
+console.log(await Announcements(process.env.CANVAS_API_TOKEN));

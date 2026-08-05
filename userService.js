@@ -1,7 +1,8 @@
 import pool from './db.js';
+import { validateToken } from './canvasService.js';
 
 /**
- * Fetch user record by Facebook PSID from Neon DB
+ * Fetch user record by Telegram PSID from Neon DB
  */
 export async function getUser(psid) {
     try {
@@ -34,25 +35,14 @@ export async function saveUser(psid, canvasToken) {
 }
 
 /**
- * Check if a user's token exists and is less than 30 days old
+ * Check if a user's token exists and is valid by sending a test GET request to Canvas API (/users/self)
  */
-export function isTokenValid(user) {
+export async function isTokenValid(user) {
     if (!user || !user.canvas_token) {
         return false;
     }
 
-    const dateVal = user.updated_at || user.created_at;
-    if (!dateVal) {
-        return true;
-    }
-
-    const updatedAt = new Date(dateVal).getTime();
-    if (isNaN(updatedAt)) {
-        return true;
-    }
-
-    const now = Date.now();
-    const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
-
-    return (now - updatedAt) < thirtyDaysInMs;
+    const validation = await validateToken(user.canvas_token);
+    return validation.valid;
 }
+
