@@ -31,17 +31,44 @@ export async function validateToken(canvasToken) {
 }
 
 /**
- * 1. Fetch active courses for a user
+ * 1. Fetch active courses for a user (prioritizing current Dashboard favorites)
  */
 export async function getCourses(canvasToken) {
     try {
         const client = createCanvasClient(canvasToken);
+
+        // 1. Fetch dashboard favorite courses (what actually appears on the user's Canvas dashboard)
+        try {
+            const favoritesResponse = await client.get('/users/self/favorites/courses', {
+                params: {
+                    'include[]': ['term'],
+                    per_page: 50
+                }
+            });
+
+            const favoriteCourses = (favoritesResponse.data || []).filter(
+                course => course.name && !course.access_restricted_by_date
+            );
+
+            if (favoriteCourses.length > 0) {
+                return favoriteCourses;
+            }
+        } catch (favErr) {
+            console.warn('Could not fetch favorites, falling back to all active courses:', favErr.message);
+        }
+
+        // 2. Fallback: fetch active courses with per_page=50 so current courses aren't truncated
         const response = await client.get('/courses', {
             params: {
-                enrollment_state: 'active'
+                enrollment_state: 'active',
+                'include[]': ['term'],
+                per_page: 50
             }
         });
-        return response.data;
+
+        return (response.data || []).filter(
+            course => course.name && !course.access_restricted_by_date
+        );
     } catch (error) {
         console.error('Error fetching Canvas courses:', error.response?.data || error.message);
         throw error;

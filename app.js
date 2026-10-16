@@ -1,6 +1,10 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import dns from 'dns';
+
+// Ensure Node.js prefers IPv4 globally to avoid IPv6 timeouts
+dns.setDefaultResultOrder('ipv4first');
 import { Courses, Announcements, Grades, Assignments } from './messageFormatter.js';
 import { validateToken } from './canvasService.js';
 import { getUser, saveUser, isTokenValid } from './userService.js';
@@ -91,8 +95,12 @@ app.post('/telegram-webhook', async (req, res) => {
             const chatId = callbackQuery.message.chat.id;
             const payload = callbackQuery.data;
 
-            // Acknowledge callback query to stop button loading spinner
-            await answerCallbackQuery(callbackQuery.id);
+            // Acknowledge callback query to stop button loading spinner (non-fatal if network delays)
+            try {
+                await answerCallbackQuery(callbackQuery.id);
+            } catch (ackErr) {
+                console.warn('Non-fatal callback query answer error:', ackErr.message);
+            }
 
             const user = await getUser(chatId);
             const valid = await isTokenValid(user);

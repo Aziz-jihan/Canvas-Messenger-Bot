@@ -1,10 +1,17 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import https from 'https';
+import dns from 'dns';
 
 dotenv.config();
 
+// Ensure Node.js prefers IPv4 to avoid ENETUNREACH / ETIMEDOUT on IPv6
+dns.setDefaultResultOrder('ipv4first');
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+
+const httpsAgent = new https.Agent({ family: 4, keepAlive: true });
 
 // Standard Telegram Inline Keyboard Grid (2x2 layout)
 export const MAIN_MENU_KEYBOARD = {
@@ -29,7 +36,10 @@ async function callTelegramAPI(method, payload) {
         return null;
     }
     try {
-        const response = await axios.post(`${TELEGRAM_API_BASE}/${method}`, payload);
+        const response = await axios.post(`${TELEGRAM_API_BASE}/${method}`, payload, {
+            httpsAgent,
+            timeout: 15000
+        });
         return response.data;
     } catch (error) {
         console.error(`Telegram API Error (${method}):`, error.response?.data || error.message);
