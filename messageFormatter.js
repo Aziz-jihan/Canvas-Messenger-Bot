@@ -132,6 +132,3 @@ export async function Assignments(canvasToken) {
         throw error;
     }
 }
-
-
-console.log(await Announcements(process.env.CANVAS_API_TOKEN));
